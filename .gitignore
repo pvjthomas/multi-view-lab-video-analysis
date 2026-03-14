@@ -1,4 +1,32 @@
+# Python bytecode
 __pycache__/
-*.pyc
-data/clips/
+*.py[cod]
+*.class
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Video/data files
 data/raw/
+data/clips/
+# Optional: metadata files if large or auto-generated
+data/metadata/*.json
+
+# IDE-specific files
+.vscode/
+.idea/
+
+# Pytest cache
+.pytest_cache/
