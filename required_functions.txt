@@ -1,0 +1,384 @@
+# Useful Functions for Biomedical Lab Video Annotation
+
+## Goal
+
+Build a system that takes video of biomedical laboratory tasks and annotates what a person is doing over time, such as pipetting, opening tubes, labeling samples, transferring liquid, or using equipment.
+
+---
+
+## 1. Video Loading and Inspection
+
+These functions help read videos and inspect their basic properties.
+
+### `load_video(video_path: str) -> cv2.VideoCapture`
+
+Open a video file and return a video capture object.
+
+### `get_video_info(video_path: str) -> dict`
+
+Return metadata such as:
+
+* frame width
+* frame height
+* frames per second
+* total frame count
+* duration
+
+### `sample_frames(video_path: str, every_n_seconds: float) -> list[np.ndarray]`
+
+Extract frames at regular intervals for preview or annotation.
+
+### `read_frame_at_time(video_path: str, timestamp_sec: float) -> np.ndarray`
+
+Read a single frame from a specific timestamp.
+
+---
+## 1a. Video Playback
+
+These functions display video in a window for visual inspection and alignment with annotations.
+
+### `play_video(video_path: str, start_time_sec: float = 0.0, end_time_sec: float | None = None) -> None`
+
+Play the video in a window from `start_time_sec` until `end_time_sec` (or end of file if `None`). Block until the user closes the window or playback finishes.
+
+* Use OpenCV (`cv2.imshow` / `cv2.waitKey`) or similar.
+* Optional: space = pause/resume, Q or Escape = quit, arrow keys = seek (if you want to specify in the doc).
+
+### `play_video_with_annotations(video_path: str, annotations: list[dict], start_time_sec: float = 0.0, end_time_sec: float | None = None) -> None`
+
+Same as `play_video`, but draw the current segment's label on each frame (e.g. from `create_annotation_record`-style entries with `start_time`, `end_time`, `label`). Use when you want to inspect how labels line up with the video.
+
+---
+
+## 2. Clip Extraction and Segmenting
+
+These functions help isolate parts of the video for task-level annotation.
+
+### `extract_clip(video_path: str, start_time: float, end_time: float, output_path: str) -> None`
+
+Save a subclip from the original video.
+
+### `split_video_into_chunks(video_path: str, chunk_length_sec: float, output_dir: str) -> list[str]`
+
+Break a long video into smaller chunks for easier processing.
+
+### `generate_candidate_segments(video_path: str, motion_threshold: float = 0.2) -> list[dict]`
+
+Suggest possible action segments based on motion or visual change.
+
+---
+
+## 3. Annotation Data Management
+
+These functions define how annotations are stored and updated.
+
+### `create_annotation_record(start: float, end: float, label: str, confidence: float | None = None) -> dict`
+
+Create a standard annotation entry.
+
+Example output:
+
+```python
+{
+    "start_time": 12.4,
+    "end_time": 18.9,
+    "label": "pipetting",
+    "confidence": 0.91
+}
+```
+
+### `save_annotations_json(annotations: list[dict], output_path: str) -> None`
+
+Save annotations to a JSON file.
+
+### `load_annotations_json(path: str) -> list[dict]`
+
+Load saved annotations.
+
+### `annotations_to_dataframe(annotations: list[dict]) -> pandas.DataFrame`
+
+Convert annotations into a table for analysis.
+
+### `merge_adjacent_annotations(annotations: list[dict], max_gap: float = 1.0) -> list[dict]`
+
+Merge nearby segments with the same task label.
+
+---
+
+## 4. Low-Level Visual Feature Extraction
+
+These functions extract signals that may help determine what the person is doing.
+
+### `compute_frame_difference(prev_frame: np.ndarray, curr_frame: np.ndarray) -> float`
+
+Measure how much the scene changes between frames.
+
+### `estimate_motion_intensity(video_path: str) -> list[float]`
+
+Return a motion score over time.
+
+### `detect_hands(frame: np.ndarray) -> dict`
+
+Use MediaPipe or another model to estimate hand positions.
+
+### `track_hand_motion(frames: list[np.ndarray]) -> list[dict]`
+
+Track hand movement across time.
+
+### `detect_objects(frame: np.ndarray) -> list[dict]`
+
+Detect relevant lab objects such as:
+
+* pipette
+* tube
+* flask
+* petri dish
+* tip box
+* centrifuge
+* microscope
+
+### `estimate_pose(frame: np.ndarray) -> dict`
+
+Estimate body or upper-body pose if useful for coarse task classification.
+
+---
+
+## 5. Task Recognition Functions
+
+These functions map visual evidence to action labels.
+
+### `predict_task_from_clip(clip_path: str) -> dict`
+
+Predict the main task performed in a clip.
+
+Example output:
+
+```python
+{
+    "label": "transferring_liquid",
+    "confidence": 0.87
+}
+```
+
+### `predict_task_sequence(video_path: str) -> list[dict]`
+
+Return a timeline of detected tasks across the whole video.
+
+### `classify_frame_action(frame: np.ndarray) -> str`
+
+Assign a task label to a single frame or short window.
+
+### `smooth_task_predictions(predictions: list[dict], min_duration: float = 2.0) -> list[dict]`
+
+Reduce noise in frame-wise or clip-wise predictions.
+
+### `map_objects_and_motion_to_task(objects: list[dict], hand_tracks: list[dict]) -> str`
+
+Rule-based baseline for task inference.
+
+Example logic:
+
+* hand near pipette + tube + repeated vertical motion -> `pipetting`
+* hand opens incubator door -> `incubator_access`
+* hand places sample under microscope -> `microscope_setup`
+
+---
+
+## 6. Domain-Specific Lab Task Helpers
+
+These functions are especially relevant for biomedical workflows.
+
+### `detect_pipetting_action(frames: list[np.ndarray]) -> dict`
+
+Identify aspirate/dispense style motions around a pipette and container.
+
+### `detect_tube_handling(frames: list[np.ndarray]) -> dict`
+
+Detect picking up, opening, closing, or placing tubes.
+
+### `detect_labeling_action(frames: list[np.ndarray]) -> dict`
+
+Detect writing or applying labels to containers.
+
+### `detect_plate_handling(frames: list[np.ndarray]) -> dict`
+
+Detect movement or manipulation of plates, dishes, or trays.
+
+### `detect_microscope_use(frames: list[np.ndarray]) -> dict`
+
+Detect microscope interaction.
+
+### `detect_centrifuge_interaction(frames: list[np.ndarray]) -> dict`
+
+Detect loading, unloading, or operating a centrifuge.
+
+### `detect_media_transfer(frames: list[np.ndarray]) -> dict`
+
+Detect transferring liquid between lab containers.
+
+---
+
+## 7. Metadata and Multi-View Support
+
+If your videos come from multiple camera views, these functions help organize them.
+
+### `load_device_metadata(path: str) -> dict`
+
+Load metadata about camera/device/view.
+
+### `align_multiview_streams(video_paths: list[str], offsets: list[float]) -> dict`
+
+Synchronize multiple videos using known time offsets.
+
+### `select_best_view_for_task(frames_by_view: dict) -> str`
+
+Choose the view that best shows the current action.
+
+### `fuse_multiview_predictions(predictions_by_view: dict) -> list[dict]`
+
+Combine predictions from multiple camera angles.
+
+---
+
+## 8. Visualization Functions
+
+These functions help inspect the annotations and model outputs.
+
+### `plot_task_timeline(annotations: list[dict]) -> None`
+
+Show a time-based plot of tasks.
+
+### `overlay_annotations_on_video(video_path: str, annotations: list[dict], output_path: str) -> None`
+
+Burn predicted labels onto the video.
+
+### `draw_hand_tracks(frame: np.ndarray, hand_data: dict) -> np.ndarray`
+
+Visualize hand keypoints.
+
+### `draw_object_boxes(frame: np.ndarray, detections: list[dict]) -> np.ndarray`
+
+Visualize detected lab tools and objects.
+
+### `preview_segment_labels(video_path: str, annotations: list[dict]) -> None`
+
+Quickly inspect the alignment between labels and video segments.
+
+---
+
+## 9. Evaluation Functions
+
+These functions help measure how well the annotation system works.
+
+### `compare_annotations(predicted: list[dict], ground_truth: list[dict]) -> dict`
+
+Compare predicted task segments against manual annotations.
+
+### `compute_task_accuracy(predicted_labels: list[str], true_labels: list[str]) -> float`
+
+Basic classification accuracy.
+
+### `compute_segment_iou(pred_segment: dict, gt_segment: dict) -> float`
+
+Measure overlap between predicted and true time segments.
+
+### `evaluate_task_detection(predicted: list[dict], ground_truth: list[dict]) -> dict`
+
+Compute precision, recall, F1, and segment overlap metrics.
+
+---
+
+## 10. Recommended Minimal First Version
+
+A practical first version of the project could focus on these functions first:
+
+1. `get_video_info`
+2. `sample_frames`
+3. `extract_clip`
+4. `create_annotation_record`
+5. `save_annotations_json`
+6. `detect_hands`
+7. `detect_objects`
+8. `map_objects_and_motion_to_task`
+9. `predict_task_sequence`
+10. `plot_task_timeline`
+
+This gives you a pipeline that can:
+
+* read a lab video
+* break it into segments
+* detect hands and objects
+* infer likely tasks
+* save annotations
+* visualize the result
+
+---
+
+## 11. Suggested Task Labels
+
+You may want a fixed vocabulary of task labels, for example:
+
+* `idle`
+* `reaching`
+* `pipetting`
+* `tube_opening`
+* `tube_closing`
+* `sample_transfer`
+* `mixing`
+* `labeling`
+* `plate_handling`
+* `microscope_use`
+* `centrifuge_loading`
+* `centrifuge_unloading`
+* `incubator_access`
+* `waste_disposal`
+* `note_taking`
+
+---
+
+## 12. Suggested File Placement in Your Repo
+
+Based on your project structure, these functions could be organized like this:
+
+* `src/utils/video_utils.py`
+
+  * `load_video`
+  * `get_video_info`
+  * `sample_frames`
+  * `read_frame_at_time`
+  * `play_video`
+  * `play_video_with_annotations`
+  * `compute_frame_difference`
+
+* `src/video_processing/clip_creator.py`
+
+  * `extract_clip`
+  * `split_video_into_chunks`
+  * `overlay_annotations_on_video`
+
+* `src/metadata/device_metadata.py`
+
+  * `load_device_metadata`
+  * `save_annotations_json`
+  * `load_annotations_json`
+
+* `src/task_detection/detector.py`
+
+  * `detect_hands`
+  * `detect_objects`
+  * `predict_task_from_clip`
+  * `predict_task_sequence`
+  * `smooth_task_predictions`
+  * `map_objects_and_motion_to_task`
+
+---
+
+## Final Note
+
+The key idea is that annotation is not just about labeling frames. It is about turning continuous lab activity into a structured timeline of actions. The most useful functions are the ones that help you:
+
+1. read and segment the video,
+2. detect meaningful visual cues,
+3. infer tasks from those cues,
+4. store results in a clean format,
+5. and visualize or evaluate the annotations.
