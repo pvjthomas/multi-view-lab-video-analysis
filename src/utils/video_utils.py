@@ -4,6 +4,9 @@ Video loading and inspection utilities for biomedical lab video annotation.
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 import cv2
 import numpy as np
 
@@ -179,6 +182,47 @@ def play_video(
     finally:
         cap.release()
         cv2.destroyAllWindows()
+
+
+def sample_frames_to_dir(
+    video_path: str,
+    output_dir: str,
+    every_n_seconds: float = 1.0,
+) -> list[tuple[float, str]]:
+    """
+    Extract frames at regular intervals and save to disk. For use with segmenter
+    (segment_video expects list of (timestamp, path)).
+
+    Args:
+        video_path: Path to the video file.
+        output_dir: Directory to write frame images (created if missing).
+        every_n_seconds: Interval in seconds between sampled frames (default 1.0).
+
+    Returns:
+        List of (timestamp_sec, path_to_frame_image).
+    """
+    if every_n_seconds <= 0:
+        raise ValueError("every_n_seconds must be positive")
+
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    info = get_video_info(video_path)
+    duration_sec = info["duration_sec"]
+    if duration_sec <= 0:
+        return []
+
+    timestamps_sec = list(np.arange(0.0, duration_sec, every_n_seconds))
+    result: list[tuple[float, str]] = []
+
+    for i, t in enumerate(timestamps_sec):
+        frame = read_frame_at_time(video_path, t)
+        if frame is None or frame.size == 0:
+            continue
+        name = f"frame_{i:06d}_{t:.1f}s.jpg"
+        path = os.path.join(output_dir, name)
+        cv2.imwrite(path, frame)
+        result.append((t, path))
+
+    return result
 
 
 def play_video_with_annotations(

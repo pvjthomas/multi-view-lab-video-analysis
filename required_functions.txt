@@ -32,6 +32,10 @@ Extract frames at regular intervals for preview or annotation.
 
 Read a single frame from a specific timestamp.
 
+### `sample_frames_to_dir(video_path: str, output_dir: str, every_n_seconds: float = 1.0) -> list[tuple[float, str]]`
+
+Extract frames at regular intervals and save to disk. Returns list of `(timestamp_sec, path_to_frame_image)` for use with segmenter (e.g. `segment_video`).
+
 ---
 ## 1a. Video Playback
 
@@ -65,6 +69,18 @@ Break a long video into smaller chunks for easier processing.
 ### `generate_candidate_segments(video_path: str, motion_threshold: float = 0.2) -> list[dict]`
 
 Suggest possible action segments based on motion or visual change.
+
+### `plot_diff_series(diff_series: list[tuple[float, float]], output_path: str) -> None`
+
+Graph mean absolute frame difference over time and save as PNG. `diff_series` is a list of `(timestamp_sec, mean_abs_diff)` (e.g. from `segment_video`). Use to inspect where scene changes occur. Called by default when `segment_video` is run with `diff_plot_path` set.
+
+### `segment_video(frames: list[tuple[float, str]], diff_threshold: float = 25.0, min_segment_duration: float = 20.0, diff_plot_path: str | None = "diff_series.png") -> tuple[list[Segment], list[tuple[float, float]]]`
+
+Split frames into segments based on visual change magnitude (frame-difference scoring). `frames` is from `sample_frames_to_dir`. Returns `(segments, diff_series)` where segments are `Segment` objects (segment_id, start_time, end_time, representative_frame) and diff_series is `(timestamp_s, mean_abs_diff)` per frame for CSV/plot. By default also generates a PNG graph of mean diff over time via `plot_diff_series` (pass `diff_plot_path=None` to skip). Tuned for cell culture lab videos: diff_threshold=25, min_segment_duration=20s.
+
+resize_video(video_path: str, output_path: str, width: int, height: int) -> None
+change_video_fps(video_path: str, output_path: str, new_fps: float) -> None
+compress_video(video_path: str, output_path: str, scale: float = 0.5, fps: float | None = None) -> None
 
 ---
 
@@ -111,15 +127,19 @@ These functions extract signals that may help determine what the person is doing
 
 ### `compute_frame_difference(prev_frame: np.ndarray, curr_frame: np.ndarray) -> float`
 
-Measure how much the scene changes between frames.
+Measure how much the scene changes between frames (in-memory arrays).
+
+### `compute_frame_difference(frame_a_path: str, frame_b_path: str) -> float`
+
+Variant: compute mean absolute pixel difference between two saved frame images (grayscale, resized). Returns score 0–255; used by `segment_video` when frames are on disk.
 
 ### `estimate_motion_intensity(video_path: str) -> list[float]`
 
 Return a motion score over time.
 
-### `detect_hands(frame: np.ndarray) -> dict`
+### `detect_hands(frame: np.ndarray, detector: Literal["mediapipe", "yolo"] = "mediapipe", **kwargs) -> dict`
 
-Use MediaPipe or another model to estimate hand positions.
+Use MediaPipe or YOLO to estimate hand positions. Supports pluggable backends: `detector="mediapipe"` for landmark-based detection, or `detector="yolo"` with a hand-detection model (requires `model_path`). Returns `left_hand`, `right_hand`, and `num_hands`; each hand has `detected`, `landmarks`, and optionally `bbox`.
 
 ### `track_hand_motion(frames: list[np.ndarray]) -> list[dict]`
 
@@ -250,15 +270,25 @@ Show a time-based plot of tasks.
 
 ### `overlay_annotations_on_video(video_path: str, annotations: list[dict], output_path: str) -> None`
 
-Burn predicted labels onto the video.
+Burn predicted task labels (segment labels) onto the video. Writes a new video file with text labels for the current segment at each timestamp.
+
+### `create_annotated_video(video_path: str, output_path: str, draw_objects: bool = True, draw_hands: bool = False, draw_task_labels: bool = False, annotations: list[dict] | None = None) -> None`
+
+Create a **new video** with bounding boxes drawn around detected objects (and optionally hands). For each frame:
+
+* If `draw_objects`: run object detection and draw boxes around lab objects (pipette, tube, etc.) using `draw_object_boxes`.
+* If `draw_hands`: run hand detection and draw hand keypoints or hand regions using `draw_hand_tracks`.
+* If `draw_task_labels` and `annotations` is provided: draw the current segment’s task label on the frame (same idea as `overlay_annotations_on_video`).
+
+Output has the same resolution and fps as the input unless you add optional resize/fps parameters. Use this to visually inspect detections or to produce shareable annotated footage.
 
 ### `draw_hand_tracks(frame: np.ndarray, hand_data: dict) -> np.ndarray`
 
-Visualize hand keypoints.
+Draw hand keypoints (and optionally connections) on a single frame. Returns the frame with overlays. `hand_data` is the dict returned by `detect_hands`.
 
 ### `draw_object_boxes(frame: np.ndarray, detections: list[dict]) -> np.ndarray`
 
-Visualize detected lab tools and objects.
+Draw bounding boxes and labels for detected lab tools and objects on a single frame. Returns the frame with boxes. `detections` is a list of dicts with `label`, `bbox`, `confidence` (e.g. from `detect_objects`). Used by `create_annotated_video` when drawing objects.
 
 ### `preview_segment_labels(video_path: str, annotations: list[dict]) -> None`
 
@@ -311,6 +341,7 @@ This gives you a pipeline that can:
 * infer likely tasks
 * save annotations
 * visualize the result
+* create a new video with boxes around detected objects (and optionally hands/labels) via `create_annotated_video`
 
 ---
 
@@ -346,15 +377,22 @@ Based on your project structure, these functions could be organized like this:
   * `get_video_info`
   * `sample_frames`
   * `read_frame_at_time`
+  * `sample_frames_to_dir`
   * `play_video`
   * `play_video_with_annotations`
-  * `compute_frame_difference`
 
 * `src/video_processing/clip_creator.py`
 
   * `extract_clip`
   * `split_video_into_chunks`
   * `overlay_annotations_on_video`
+  * `create_annotated_video` (new video with boxes around objects/hands and optional task labels)
+
+* `src/video_processing/segmenter.py`
+
+  * `compute_frame_difference` (path-based variant)
+  * `plot_diff_series` (graph mean diff → PNG)
+  * `segment_video`
 
 * `src/metadata/device_metadata.py`
 
