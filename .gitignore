@@ -21,6 +21,7 @@ Thumbs.db
 # Video/data files
 data/raw/
 data/clips/
+clips/
 # Optional: metadata files if large or auto-generated
 data/metadata/*.json
 
