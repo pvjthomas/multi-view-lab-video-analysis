@@ -50,6 +50,24 @@ def _hands_result_dict(
     }
 
 
+def _bbox_from_landmarks(
+    landmarks: list[tuple[float, ...]],
+    padding: float = 0.1,
+) -> tuple[float, float, float, float]:
+    """Compute (x1, y1, x2, y2) from landmark list; add padding as fraction of size."""
+    if not landmarks:
+        return (0.0, 0.0, 1.0, 1.0)
+    xs = [p[0] for p in landmarks]
+    ys = [p[1] for p in landmarks]
+    x1, x2 = min(xs), max(xs)
+    y1, y2 = min(ys), max(ys)
+    w = max(x2 - x1, 1.0)
+    h = max(y2 - y1, 1.0)
+    pad_x = w * padding
+    pad_y = h * padding
+    return (x1 - pad_x, y1 - pad_y, x2 + pad_x, y2 + pad_y)
+
+
 # ----- MediaPipe backend -----
 
 def _detect_hands_mediapipe(frame: np.ndarray) -> dict[str, Any]:
@@ -89,7 +107,8 @@ def _detect_hands_mediapipe(frame: np.ndarray) -> dict[str, Any]:
             (lm.x * w, lm.y * h, getattr(lm, "z", 0.0))
             for lm in hand_landmarks.landmark
         ]
-        hand_dict = _hand_result(detected=True, landmarks=landmarks, bbox=None)
+        bbox = _bbox_from_landmarks(landmarks)
+        hand_dict = _hand_result(detected=True, landmarks=landmarks, bbox=bbox)
         if is_left:
             left = hand_dict
         else:
@@ -217,12 +236,13 @@ def track_hand_motion(
 
 def draw_hand_tracks(frame: np.ndarray, hand_data: dict[str, Any]) -> np.ndarray:
     """
-    Draw hand keypoints and/or bounding boxes on a frame. Returns a new frame
-    with overlays. hand_data is the dict returned by detect_hands (left_hand,
-    right_hand, num_hands).
+    Draw hand keypoints, bounding boxes, confidence, and velocity on a frame.
+    hand_data: left_hand, right_hand, num_hands; each hand may have bbox, confidence, velocity.
+    Always draws bbox (from hand['bbox'] or computed from landmarks if missing).
     """
     out = frame.copy()
     colors = {"left_hand": (0, 165, 255), "right_hand": (255, 165, 0)}  # BGR: orange, blue
+    h_img, w_img = out.shape[:2]
 
     for hand_key, color in colors.items():
         hand = hand_data.get(hand_key, _empty_hand())
@@ -230,18 +250,37 @@ def draw_hand_tracks(frame: np.ndarray, hand_data: dict[str, Any]) -> np.ndarray
             continue
         label = "L" if hand_key == "left_hand" else "R"
         bbox = hand.get("bbox")
-        if bbox is not None:
-            x1, y1, x2, y2 = (int(round(x)) for x in bbox)
+        landmarks = hand.get("landmarks") or []
+        if bbox is None and landmarks:
+            bbox = _bbox_from_landmarks(landmarks)
+        if bbox is not None and len(bbox) >= 4:
+            # bbox is (x1, y1, x2, y2)
+            x1, y1 = max(0, int(round(bbox[0]))), max(0, int(round(bbox[1])))
+            x2, y2 = min(w_img, int(round(bbox[2]))), min(h_img, int(round(bbox[3])))
             cv2.rectangle(out, (x1, y1), (x2, y2), color, 2)
+            # Label and confidence
+            conf = hand.get("confidence")
+            if conf is not None:
+                text = f"{label} {conf:.2f}"
+            else:
+                text = label
             cv2.putText(
-                out, label, (x1, y1 - 6),
+                out, text, (x1, y1 - 6),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA,
             )
-        landmarks = hand.get("landmarks") or []
+            # Velocity below box
+            vel = hand.get("velocity")
+            if vel is not None and len(vel) >= 2:
+                vx, vy = vel[0], vel[1]
+                cv2.putText(
+                    out, f"v: {vx:.0f},{vy:.0f}", (x1, y2 + 16),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1, cv2.LINE_AA,
+                )
         for pt in landmarks:
             x, y = float(pt[0]), float(pt[1])
             cx, cy = int(round(x)), int(round(y))
-            cv2.circle(out, (cx, cy), 3, color, -1)
+            if 0 <= cx < w_img and 0 <= cy < h_img:
+                cv2.circle(out, (cx, cy), 3, color, -1)
     return out
 
 

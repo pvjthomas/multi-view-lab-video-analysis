@@ -1,0 +1,303 @@
+# Required Hand-Tracking Functions
+
+Functions for tracking hand state, geometry, color models, motion, and detector/tracker pipeline integration.
+
+---
+
+## 1. Track State / Data Helpers
+
+### `init_track_state(det_box, det_points, det_score, frame) -> TrackState`
+
+Create new track with metadata.
+
+Stores:
+* box
+* points
+* confidence
+* color stats
+* velocity
+* frame index
+* weak counter
+
+### `update_track_state(track, box, points, score, frame) -> TrackState`
+
+Update state after tracking or detection.
+
+Updates:
+* box
+* velocity
+* confidence
+* last_frame
+* weak counter reset
+
+### `mark_track_weak(track) -> None`
+
+Increase weak counter.
+
+### `is_track_weak(track, threshold) -> bool`
+
+Check if tracking confidence too low.
+
+`is_track_weak(track, score)`
+
+---
+
+## 2. Geometry / Box Helpers
+
+### `box_center(box) -> tuple[float, float]`
+
+`(cx, cy) = box_center(box)`
+
+### `box_velocity(prev_box, curr_box) -> tuple[float, float, float, float]`
+
+`(vx, vy, vw, vh) = box_velocity(prev_box, curr_box)`
+
+### `predict_next_box(track) -> box`
+
+Use velocity or Kalman.
+
+`box = predict_next_box(track)`
+
+### `expand_box(box, scale) -> roi`
+
+Neighborhood search region.
+
+`roi = expand_box(box, scale=1.5)`
+
+### `box_distance(box1, box2) -> float`
+
+`d = box_distance(a, b)`
+
+### `geometry_score(pred_box, new_box) -> float`
+
+Higher if close to prediction.
+
+`score = geometry_score(pred, new)`
+
+---
+
+## 3. Color Model Helpers
+
+### `compute_color_stats(frame, box) -> dict`
+
+Compute mean / histogram.
+
+`stats = compute_color_stats(frame, box)`
+
+Return:
+* hsv histogram OR
+* lab mean/std
+
+### `update_color_model(track, frame, box) -> None`
+
+Update slowly to avoid drift.
+
+### `color_similarity(stats, frame, box) -> float`
+
+Compare candidate region to glove color.
+
+`score = color_similarity(track.color_stats, frame, box)`
+
+### `color_mask(frame, color_stats) -> np.ndarray`
+
+Optional mask.
+
+`mask = color_mask(frame, stats)`
+
+---
+
+## 4. Motion Helpers
+
+### `compute_motion_mask(prev_frame, frame) -> np.ndarray`
+
+Frame differencing or bg subtract.
+
+`mask = compute_motion_mask(prev, curr)`
+
+### `motion_score(mask, box) -> float`
+
+How much motion inside box.
+
+`score = motion_score(mask, box)`
+
+### `optical_flow_points(prev_frame, frame, points) -> array`
+
+Track keypoints.
+
+`new_points = optical_flow_points(prev, curr, pts)`
+
+### `flow_box_from_points(points) -> box`
+
+Estimate box from tracked points.
+
+`box = flow_box_from_points(points)`
+
+---
+
+## 5. Tracker Helpers
+
+### `init_tracker(frame, box, type) -> tracker`
+
+CSRT / KCF / MOSSE.
+
+`tracker = init_tracker(frame, box, type)`
+
+### `update_tracker(tracker, frame) -> tuple[box, score]`
+
+`box, score = update_tracker(tracker, frame)`
+
+If tracker doesn't give score, make one.
+
+### `tracker_score(box, prev_box) -> float`
+
+Quality estimate.
+
+`score = tracker_score(box, prev_box)`
+
+---
+
+## 6. Kalman / Prediction Helpers (optional but good)
+
+### `init_kalman(box) -> kf`
+
+`kf = init_kalman(box)`
+
+### `kalman_predict(kf) -> box`
+
+`box = kalman_predict(kf)`
+
+### `kalman_update(kf, box) -> None`
+
+`kalman_update(kf, box)`
+
+---
+
+## 7. Candidate Search Helpers
+
+### `extract_roi(frame, box) -> np.ndarray`
+
+`roi = extract_roi(frame, box)`
+
+### `find_candidates_in_roi(frame, roi, motion_mask, color_mask) -> list`
+
+Return candidate boxes.
+
+`boxes = find_candidates_in_roi(...)`
+
+### `choose_best_candidate(candidates, track) -> box`
+
+Use scores.
+
+`best = choose_best_candidate(list, track)`
+
+---
+
+## 8. Score Computation Helpers
+
+### `compute_detector_score(det) -> float`
+
+`score = compute_detector_score(det)`
+
+### `compute_tracker_score(track) -> float`
+
+`score = compute_tracker_score(track)`
+
+### `compute_color_score(track, frame, box) -> float`
+
+`score = compute_color_score(track, frame, box)`
+
+### `compute_motion_score(mask, box) -> float`
+
+`score = compute_motion_score(mask, box)`
+
+### `compute_geometry_score(track, box) -> float`
+
+`score = compute_geometry_score(track, box)`
+
+### `combine_scores(detector, tracker, color, motion, geometry) -> float`
+
+`score = combine_scores(detector, tracker, color, motion, geometry)`
+
+Example:
+
+```python
+return (
+    0.4 * tracker +
+    0.25 * detector +
+    0.2 * color +
+    0.1 * motion +
+    0.05 * geometry
+)
+```
+
+---
+
+## 9. Detector Control Helpers
+
+### `should_run_detector(frame_idx, track) -> bool`
+
+`bool should_run_detector(i, track)`
+
+Conditions:
+* first frame
+* every N
+* weak track
+
+### `run_detector(frame) -> det`
+
+You already have.
+
+`det = run_detector(frame)`
+
+### `reinitialize_from_detection(track, det) -> track`
+
+`track = reinitialize_from_detection(track, det)`
+
+---
+
+## 10. Main Pipeline Helpers
+
+### `process_first_frame(frame) -> track`
+
+`track = process_first_frame(frame)`
+
+### `process_frame(frame, prev_frame, track, frame_idx) -> track`
+
+Main loop.
+
+`track = process_frame(frame, prev, track, i)`
+
+Inside:
+* if `should_run_detector()`:
+    * `det = run_detector()`
+    * if det: `init_track_state()`
+* else:
+    * `pred = predict_next_box()`
+    * `roi = expand_box()`
+    * `tracker.update()`
+    * `motion_score()`
+    * `color_score()`
+    * `combine_scores()`
+    * if weak: `run_detector()`
+
+---
+
+## 11. Minimum Set to Implement First
+
+If you want smallest working version:
+
+1. `init_track_state`
+2. `update_track_state`
+3. `predict_next_box`
+4. `expand_box`
+5. `compute_color_stats`
+6. `color_similarity`
+7. `compute_motion_mask`
+8. `motion_score`
+9. `init_tracker`
+10. `update_tracker`
+11. `combine_scores`
+12. `should_run_detector`
+13. `process_frame`
+
+That is enough to stabilize detection a lot.
